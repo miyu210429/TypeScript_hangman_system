@@ -172,8 +172,122 @@ class Message {
     end() {
       this.ui.output("ゲーム終了です！お疲れ様でした！");
     }
-  }
-  
+}
 
+interface GameState {
+    stage: Stage; 
+    done: boolean; 
+}
+
+class Game {
+    quiz: Quiz;
+    message: Message;
+    stage: Stage;
+    ui: UserInterface;
+
+    constructor(quiz: Quiz,message: Message, ui: UserInterface) {
+        this.quiz = quiz;
+        this.message = message;
+        this.ui = ui;
+        this.stage = new Stage(this.quiz.getNext());
+    }
+
+    shouldEnd(): boolean {
+       if(this.stage.isGameOver()) {
+            return true;
+        }
+        if (!this.quiz.hasNext() && this.stage.isCorrect()) {
+            return true;
+        }
+        return false;
+    }
+
+    next(isCorrect: boolean): GameState {
+        if (!isCorrect) {
+          // 推論に間違えた場合
+          this.stage.decrementAttempts();
+        }
+    
+        if (this.shouldEnd()) {
+          // ゲームを終了すると判断するとき
+          return { stage: this.stage, done: true }; // ゲーム終了のためにdoneをtrueに設定する。
+        }
+    
+        if (isCorrect) {
+          // 推測が完全に一致した場合
+          this.stage = new Stage(this.quiz.getNext()); // 次のstageの情報を設定
+        }
+    
+        return { stage: this.stage, done: false }; // ゲームは終了しない。
+    }
+
+    async start(): Promise<void> {
+        this.ui.clear();
+        this.message.start();
+    
+        let state: GameState = {
+          stage: this.stage,
+          done: false,
+        };
+    
+        while (!state.done) {
+
+            if (state.stage === undefined) break;
+            const { stage } = state;
+        
+            this.message.leftQuestions(this.quiz); 
+            this.message.askQuestion(stage);
+            const userInput = await this.ui.input();
+        
+            if (!userInput) {
+                this.message.enterSomething();
+
+                state = this.next(false);
+                continue; 
+            }
+    
+            stage.updateAnswer(userInput);
+    
+            if (stage.isCorrect()) {
+                this.message.correct(stage.question);
+                state = this.next(true); 
+                continue;
+            }
+    
+
+            if (stage.isTooLong(userInput)) {
+                this.message.notCorrect(userInput);
+    
+                state = this.next(false);
+                continue;
+            }
+    
+  
+            if (stage.isIncludes(userInput)) {
+                this.message.hit(userInput);
+                continue;
+            }
+    
+         
+            this.message.notInclude(userInput);
+            state = this.next(false);
+        }
+    
+     
+        if (state.stage.isGameOver()) {
+          this.message.gameover(this.stage.question); 
+        }
+    
+        this.message.end();
+        this.ui.destroy();
+    }
+    
+}
+  
 const questions: Question[] = rawData;
 const quiz = new Quiz(questions);
+const message = new Message(CLI);
+const game = new Game(quiz, message, CLI);
+
+game.start();
+
